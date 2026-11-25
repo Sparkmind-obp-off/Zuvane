@@ -6,7 +6,7 @@ import { enforceRateLimit } from "../src/services/ratelimit.js";
 import { audit, log } from "../src/services/audit.js";
 import * as api from "../src/api/routes.js";
 
-export const VERSION = "0.3.0";
+const VERSION = "0.3.0";
 
 // [method, pattern, handler, scope] — scope "user" = authenticated only; "workspace" = membership required.
 const ROUTES = [

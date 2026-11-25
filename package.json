@@ -1,16 +1,22 @@
 {
   "name": "zuvane-workspace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "ZUVANE Agentic Workspace",
   "scripts": {
     "test": "node --test",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "check": "node --check worker/index.js && node --check src/domain/tasks.js && node --check src/auth/clerk.js && node --check public/app.js && node --test"
+    "check": "node scripts/check-syntax.mjs && node --test",
+    "db:migrate:local": "wrangler d1 migrations apply zuvane-local --local",
+    "db:migrate:prod": "wrangler d1 migrations apply zuvane-production --remote --env production",
+    "deploy:prod": "npm run check && wrangler deploy --env production",
+    "audit": "npm audit --omit=optional"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

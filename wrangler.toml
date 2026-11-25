@@ -7,13 +7,17 @@ workers_dev = true
 directory = "./public"
 binding = "ASSETS"
 run_worker_first = ["/api/*"]
+not_found_handling = "single-page-application"
 
+# ---------------------------------------------------------------------------
+# Local development (default environment): existing Clerk DEVELOPMENT instance.
+# ---------------------------------------------------------------------------
 [vars]
-# Development Clerk instance. Set production values in the Cloudflare production environment.
 CLERK_PUBLISHABLE_KEY = "pk_test_YWN0dWFsLWNvbHQtMzAzOC5jbGVyay5hY2NvdW50cy5kZXYk"
 CLERK_FRONTEND_API_URL = "https://actual-colt-3038.clerk.accounts.dev"
 CLERK_ISSUER = "https://actual-colt-3038.clerk.accounts.dev"
 CLERK_JWKS_URL = "https://actual-colt-3038.clerk.accounts.dev/.well-known/jwks.json"
+API_RATE_LIMIT_PER_MIN = "300"
 
 [[d1_databases]]
 binding = "DB"
@@ -22,4 +26,37 @@ database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Production: existing Clerk PRODUCTION instance (clerk.zuvane.biz.id).
+# Deploy: npm run db:migrate:prod && npm run deploy:prod
+# Secret (never committed): wrangler secret put CLERK_SECRET_KEY --env production
+# ---------------------------------------------------------------------------
+[env.production]
+name = "zuvane-workspace"
+workers_dev = false
+routes = [{ pattern = "zuvane.biz.id", custom_domain = true }]
+
+[env.production.assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+not_found_handling = "single-page-application"
+
+[env.production.vars]
+CLERK_PUBLISHABLE_KEY = "pk_live_Y2xlcmsuenV2YW5lLmJpei5pZCQ"
+CLERK_FRONTEND_API_URL = "https://clerk.zuvane.biz.id"
+CLERK_ISSUER = "https://clerk.zuvane.biz.id"
+CLERK_JWKS_URL = "https://clerk.zuvane.biz.id/.well-known/jwks.json"
+CLERK_AUTHORIZED_PARTIES = "https://zuvane.biz.id"
+API_RATE_LIMIT_PER_MIN = "300"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "zuvane-production"
+database_id = "PENDING_CREATE"
+migrations_dir = "migrations"
+
+[env.production.observability]
 enabled = true

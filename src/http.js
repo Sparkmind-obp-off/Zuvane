@@ -93,7 +93,7 @@ export function contentSecurityPolicy(frontendApiUrl) {
   return [
     "default-src 'self'",
     `script-src 'self' ${clerk} https://challenges.cloudflare.com https://accounts.google.com`.trim(),
-    `connect-src 'self' ${clerk} https://accounts.google.com`.trim(),
+    `connect-src 'self' ${clerk} https://accounts.google.com https://clerk-telemetry.com`.trim(),
     "img-src 'self' data: https://img.clerk.com https://*.googleusercontent.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
