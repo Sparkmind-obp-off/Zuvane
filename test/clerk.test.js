@@ -7,7 +7,11 @@ const toBase64Url = (bytes) => Buffer.from(bytes).toString("base64url");
 const encodeJson = (value) => toBase64Url(encoder.encode(JSON.stringify(value)));
 
 async function fixture(overrides = {}) {
-  const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const pair = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"]
+  );
   const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
   jwk.kid = "test-key";
   jwk.use = "sig";
@@ -26,14 +30,17 @@ async function fixture(overrides = {}) {
   const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, encoder.encode(input));
   return {
     token: `${input}.${toBase64Url(signature)}`,
-    jwks: { keys: [jwk] },
-    fetcher: async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { "content-type": "application/json" } })
+    jwksUrl: `https://clerk.example.test/.well-known/jwks.json?key=${jwk.n.slice(0, 10)}`,
+    fetcher: async () => new Response(JSON.stringify({ keys: [jwk] }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    })
   };
 }
 
 const baseOptions = (f) => ({
   issuer: "https://clerk.example.test",
-  jwksUrl: "https://clerk.example.test/.well-known/jwks.json",
+  jwksUrl: f.jwksUrl,
   authorizedParties: ["https://workspace.example.test"],
   now: 1_800_000_000,
   fetcher: f.fetcher
@@ -73,23 +80,15 @@ test("returns 401 when a request has no bearer session", async () => {
   assert.deepEqual(result, { ok: false, status: 401, error: "Sign in to access this workspace." });
 });
 
-test("authenticates a bearer session and returns the Clerk user id", async () => {
+test("authenticates a valid bearer token and returns the verified user id", async () => {
   const f = await fixture();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify(f.jwks), {
-    status: 200,
-    headers: { "content-type": "application/json" }
+  const request = new Request("https://workspace.example.test/api/tasks", {
+    headers: { authorization: `Bearer ${f.token}` }
   });
-  try {
-    const request = new Request("https://workspace.example.test/api/tasks", {
-      headers: { authorization: `Bearer ${f.token}` }
-    });
-    const result = await authenticateClerkRequest(request, {
-      CLERK_ISSUER: "https://clerk.example.test",
-      CLERK_JWKS_URL: `https://clerk.example.test/${crypto.randomUUID()}/.well-known/jwks.json`
-    });
-    assert.deepEqual(result, { ok: true, userId: "user_test123", sessionId: "sess_test123" });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const result = await authenticateClerkRequest(request, {
+    CLERK_ISSUER: "https://clerk.example.test",
+    CLERK_JWKS_URL: f.jwksUrl,
+    CLERK_AUTHORIZED_PARTIES: "https://workspace.example.test"
+  }, { fetcher: f.fetcher, now: 1_800_000_000 });
+  assert.deepEqual(result, { ok: true, userId: "user_test123", sessionId: "sess_test123" });
 });
