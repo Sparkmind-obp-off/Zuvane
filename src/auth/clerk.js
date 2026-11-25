@@ -80,9 +80,9 @@ export async function authenticateClerkRequest(request, env) {
   if (!issuer || !jwksUrl) return { ok: false, status: 503, error: "Clerk authentication is not configured on this Worker." };
 
   const authorizedParties = String(env.CLERK_AUTHORIZED_PARTIES || "")
-    .split(",").map(value => value.trim()).filter(Boolean);
+    .split(",").map((value) => value.trim()).filter(Boolean);
   try {
-    const claims = await verifyClerkToken(authorizationMatch[1], {
+    const claims = await verifyClerkToken(match[1], {
       issuer,
       jwksUrl,
       authorizedParties,

@@ -72,3 +72,24 @@ test("returns 401 when a request has no bearer session", async () => {
   const result = await authenticateClerkRequest(new Request("https://workspace.example.test/api/tasks"), {});
   assert.deepEqual(result, { ok: false, status: 401, error: "Sign in to access this workspace." });
 });
+
+test("authenticates a bearer session and returns the Clerk user id", async () => {
+  const f = await fixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify(f.jwks), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
+  try {
+    const request = new Request("https://workspace.example.test/api/tasks", {
+      headers: { authorization: `Bearer ${f.token}` }
+    });
+    const result = await authenticateClerkRequest(request, {
+      CLERK_ISSUER: "https://clerk.example.test",
+      CLERK_JWKS_URL: `https://clerk.example.test/${crypto.randomUUID()}/.well-known/jwks.json`
+    });
+    assert.deepEqual(result, { ok: true, userId: "user_test123", sessionId: "sess_test123" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
