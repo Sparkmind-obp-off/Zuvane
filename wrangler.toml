@@ -55,7 +55,7 @@ API_RATE_LIMIT_PER_MIN = "300"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "zuvane-production"
-database_id = "PENDING_CREATE"
+database_id = "629c32c8-d5ff-4d51-b99b-8028c9cbedbf"
 migrations_dir = "migrations"
 
 [env.production.observability]

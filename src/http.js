@@ -92,12 +92,12 @@ export function contentSecurityPolicy(frontendApiUrl) {
   try { clerk = frontendApiUrl ? new URL(frontendApiUrl).origin : ""; } catch { clerk = ""; }
   return [
     "default-src 'self'",
-    `script-src 'self' ${clerk} https://challenges.cloudflare.com https://accounts.google.com`.trim(),
-    `connect-src 'self' ${clerk} https://accounts.google.com https://clerk-telemetry.com`.trim(),
+    `script-src 'self' ${clerk} https://cdn.protect.clerk.com https://challenges.cloudflare.com https://accounts.google.com https://static.cloudflareinsights.com`.trim(),
+    `connect-src 'self' ${clerk} https://cdn.protect.clerk.com https://*.protect.clerk.com https://*.client.protect.clerk.com:* https://accounts.google.com https://clerk-telemetry.com https://cloudflareinsights.com`.trim(),
     "img-src 'self' data: https://img.clerk.com https://*.googleusercontent.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
-    "frame-src 'self' https://challenges.cloudflare.com https://accounts.google.com",
+    "frame-src 'self' https://challenges.cloudflare.com https://accounts.google.com https://cdn.protect.clerk.com",
     "worker-src 'self' blob:",
     "form-action 'self'",
     "base-uri 'self'",

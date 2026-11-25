@@ -1,7 +1,7 @@
 # ZUVANE MVP Runtime
 
 ## Scope of this slice
-This first application slice delivers a working workspace shell, task lifecycle, and human approval queue. It is not yet a multi-agent execution engine.
+v0.3.0 adds workspaces and RBAC, an agent registry, a bounded orchestration engine, an approval center tied to runs, a tool gateway with mock adapters, and an audit trail. See README.md for the full API.
 
 ## Architecture
 - **Web UI:** static, responsive HTML/CSS/JavaScript served by Cloudflare Workers Static Assets.
@@ -15,7 +15,7 @@ This first application slice delivers a working workspace shell, task lifecycle,
 - The Worker validates all incoming task and approval payloads.
 - State transitions are allowlisted in deterministic domain logic.
 - Approval decisions are explicit human actions.
-- No model, agent, email, browser, terminal, or third-party tool execution is enabled in this slice.
+- Only the deterministic mock provider and mock tool adapters are enabled. No external model, email, calendar, browser or terminal is ever contacted.
 
 ## API
 - `GET /api/health`

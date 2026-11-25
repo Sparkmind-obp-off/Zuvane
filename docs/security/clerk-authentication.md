@@ -22,21 +22,21 @@ npx wrangler d1 migrations apply zuvane-local --local
 npm run dev
 ```
 
-## Production configuration (not yet deployed)
+## Production configuration (deployed)
 
-Before deploying, configure these Worker variables for the production instance:
+`wrangler.toml` `[env.production]` is bound to the existing Clerk Production instance:
 
-- `CLERK_PUBLISHABLE_KEY`: production publishable key from Clerk.
-- `CLERK_FRONTEND_API_URL`: `https://clerk.zuvane.biz.id`.
-- `CLERK_ISSUER`: `https://clerk.zuvane.biz.id`.
+- `CLERK_PUBLISHABLE_KEY`: production publishable key (public).
+- `CLERK_FRONTEND_API_URL` / `CLERK_ISSUER`: `https://clerk.zuvane.biz.id`.
 - `CLERK_JWKS_URL`: `https://clerk.zuvane.biz.id/.well-known/jwks.json`.
-- `CLERK_AUTHORIZED_PARTIES`: exact production app origin(s), comma-separated.
+- `CLERK_AUTHORIZED_PARTIES`: `https://zuvane.biz.id`.
+- `CLERK_SECRET_KEY`: Worker **secret** (never committed). It is used only to read a user's own name/email from the Clerk Backend API at most once every 24 h.
 
-Bind the intended production D1 database as `DB`, apply both migrations, and verify the Clerk authorized party before enabling traffic. The checked-in D1 identifier remains a local placeholder. No Cloudflare database, deployment, paid add-on, or production resource was created by this change.
+Clerk Production was inspected read-only: environment `production`, domain `zuvane.biz.id`, Google OAuth is the only sign-in strategy, single-session mode, and all Clerk DNS records are present in the Cloudflare zone. No Clerk settings were changed.
 
 ## Security limitations
 
-- This slice implements personal-user ownership. Clerk Organizations, team membership, role-based access control, invitation flows, and organization-scoped data are not yet implemented.
-- Existing task rows from before migration `0002` have `owner_id = NULL`; they remain inaccessible until explicitly migrated by an authorized data-owner process.
+- Workspaces, memberships and roles (owner/admin/member/viewer) are implemented in ZUVANE itself, not with Clerk Organizations. Members are added by email after they have signed in once; email invitations are not implemented.
+- Task rows from before migration `0002` with `owner_id = NULL` remain inaccessible. Rows that have an owner are adopted into that owner's personal workspace on first sign-in.
 - Configure MFA and sign-up restrictions in Clerk separately after product access policy is decided. This code does not change Clerk Dashboard settings.
 - JWKS keys are cached in Worker isolate memory for five minutes. A cold isolate fetches the JWKS endpoint again.

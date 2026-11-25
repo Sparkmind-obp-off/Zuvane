@@ -1,0 +1,29 @@
+name: ZUVANE CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax check + unit/integration tests (real migrations on node:sqlite)
+        run: npm run check
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Secret scan (Clerk secret keys must never be committed)
+        run: |
+          if grep -rEn "sk_(live|test)_[A-Za-z0-9]{10,}" --exclude-dir=node_modules --exclude-dir=.git .; then
+            echo "Secret key material found"; exit 1
+          fi
+      - name: Validate Worker bundle (dry run)
+        run: npx wrangler deploy --dry-run --env production --outdir /tmp/zuvane-dist
