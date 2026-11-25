@@ -73,7 +73,7 @@ test("scopes the task list query to the verified Clerk subject", async () => {
       headers: { authorization: `Bearer ${token}` }
     }), { ...env, DB: db, CLERK_JWKS_URL: jwksUrl });
     assert.equal(response.status, 200);
-    assert.match(calls[0].sql, /WHERE owner_id = \\?/);
+    assert.match(calls[0].sql, /WHERE owner_id = \?/);
     assert.deepEqual(calls[0].values, ["user_owner123"]);
   } finally {
     globalThis.fetch = originalFetch;
