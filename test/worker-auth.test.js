@@ -1,81 +1,93 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../worker/index.js";
-
-const env = {
-  DB: {},
-  CLERK_ISSUER: "https://clerk.example.test",
-  CLERK_JWKS_URL: "https://clerk.example.test/.well-known/jwks.json"
-};
+import { createHarness, signToken, createKey, ORIGIN, ISSUER } from "./helpers/harness.js";
 
 test("keeps the health endpoint public", async () => {
-  const response = await worker.fetch(new Request("https://workspace.example.test/api/health"), {});
+  const response = await worker.fetch(new Request(`${ORIGIN}/api/health`), {});
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).ok, true);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.auth_configured, false);
 });
 
 test("exposes only public Clerk frontend configuration", async () => {
-  const response = await worker.fetch(new Request("https://workspace.example.test/api/config"), {
+  const response = await worker.fetch(new Request(`${ORIGIN}/api/config`), {
     CLERK_PUBLISHABLE_KEY: "pk_test_public",
-    CLERK_FRONTEND_API_URL: "https://clerk.example.test"
+    CLERK_FRONTEND_API_URL: "https://clerk.example.test",
+    CLERK_SECRET_KEY: "sk_test_must_not_leak"
   });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
-    publishableKey: "pk_test_public",
-    frontendApiUrl: "https://clerk.example.test"
-  });
+  const text = await response.text();
+  assert.deepEqual(JSON.parse(text), { publishableKey: "pk_test_public", frontendApiUrl: "https://clerk.example.test" });
+  assert.ok(!text.includes("sk_test"));
 });
 
-test("rejects protected API requests before accessing the database when no session is supplied", async () => {
-  const response = await worker.fetch(new Request("https://workspace.example.test/api/tasks"), env);
+test("unauthenticated API request returns 401 before touching the database", async () => {
+  let touched = false;
+  const db = { prepare() { touched = true; throw new Error("db touched"); } };
+  const response = await worker.fetch(new Request(`${ORIGIN}/api/me`), { DB: db, CLERK_ISSUER: ISSUER, CLERK_JWKS_URL: `${ISSUER}/jwks` });
   assert.equal(response.status, 401);
-  assert.deepEqual(await response.json(), { error: "Sign in to access this workspace." });
+  assert.equal((await response.json()).code, "unauthenticated");
+  assert.equal(touched, false);
 });
 
-test("scopes the task list query to the verified Clerk subject", async () => {
-  const encoder = new TextEncoder();
-  const toBase64Url = (bytes) => Buffer.from(bytes).toString("base64url");
-  const encodeJson = (value) => toBase64Url(encoder.encode(JSON.stringify(value)));
-  const pair = await crypto.subtle.generateKey({
-    name: "RSASSA-PKCS1-v1_5", modulusLength: 2048,
-    publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256"
-  }, true, ["sign", "verify"]);
-  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
-  jwk.kid = "owner-test-key";
-  jwk.use = "sig";
-  const header = encodeJson({ alg: "RS256", kid: jwk.kid, typ: "JWT" });
-  const payload = encodeJson({
-    iss: "https://clerk.example.test", sub: "user_owner123", sid: "sess_owner123",
-    exp: Math.floor(Date.now() / 1000) + 300, azp: "https://workspace.example.test"
-  });
-  const signingInput = `${header}.${payload}`;
-  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, encoder.encode(signingInput));
-  const token = `${signingInput}.${toBase64Url(signature)}`;
-  const originalFetch = globalThis.fetch;
-  const calls = [];
-  const db = {
-    prepare(sql) {
-      const statement = {
-        sql,
-        values: [],
-        bind(...values) { this.values = values; calls.push({ sql, values }); return this; },
-        async all() { return { results: [] }; }
-      };
-      return statement;
-    }
-  };
-  const jwksUrl = `https://clerk.example.test/${crypto.randomUUID()}/.well-known/jwks.json`;
-  globalThis.fetch = async () => new Response(JSON.stringify({ keys: [jwk] }), {
-    status: 200, headers: { "content-type": "application/json" }
-  });
+test("missing Clerk verification configuration fails closed with 503", async () => {
+  const response = await worker.fetch(new Request(`${ORIGIN}/api/me`, { headers: { authorization: "Bearer a.b.c" } }), { DB: {} });
+  assert.equal(response.status, 503);
+});
+
+test("rejects expired, wrong-issuer, wrong-azp, tampered and foreign-key tokens; accepts a valid one", async () => {
+  const h = await createHarness();
   try {
-    const response = await worker.fetch(new Request("https://workspace.example.test/api/tasks", {
-      headers: { authorization: `Bearer ${token}` }
-    }), { ...env, DB: db, CLERK_JWKS_URL: jwksUrl });
-    assert.equal(response.status, 200);
-    assert.match(calls[0].sql, /WHERE owner_id = \?/);
-    assert.deepEqual(calls[0].values, ["user_owner123"]);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    const now = Math.floor(Date.now() / 1000);
+    const cases = {
+      expired: await signToken(h.key, { exp: now - 10 }),
+      wrongIssuer: await signToken(h.key, { iss: "https://evil.example" }),
+      wrongAzp: await signToken(h.key, { azp: "https://evil.example" }),
+      notYetValid: await signToken(h.key, { nbf: now + 600 }),
+      badSubject: await signToken(h.key, { sub: "admin" }),
+      foreignKey: await signToken(await createKey(h.key.jwk.kid), {})
+    };
+    const valid = await signToken(h.key, { sub: "user_valid" });
+    const [hd, pl, sig] = valid.split(".");
+    const forged = JSON.parse(Buffer.from(pl, "base64url").toString());
+    forged.sub = "user_victim";
+    cases.tampered = `${hd}.${Buffer.from(JSON.stringify(forged)).toString("base64url")}.${sig}`;
+    cases.malformed = "not-a-jwt";
+    cases.algNone = `${Buffer.from(JSON.stringify({ alg: "none", kid: h.key.jwk.kid })).toString("base64url")}.${pl}.`;
+    for (const [name, token] of Object.entries(cases)) {
+      const response = await worker.fetch(new Request(`${ORIGIN}/api/me`, { headers: { authorization: `Bearer ${token}` } }), h.env, { waitUntil() {} });
+      assert.equal(response.status, 401, `${name} must be rejected`);
+    }
+    const ok = await worker.fetch(new Request(`${ORIGIN}/api/me`, { headers: { authorization: `Bearer ${valid}` } }), h.env, { waitUntil() {} });
+    assert.equal(ok.status, 200);
+    const me = await ok.json();
+    assert.equal(me.user.id, "user_valid");
+    assert.equal(me.workspaces.length, 1);
+    assert.equal(me.workspaces[0].role, "owner");
+    assert.equal(me.workspaces[0].kind, "personal");
+  } finally { h.restore(); }
+});
+
+test("rejects cross-origin state-changing requests (CSRF defence)", async () => {
+  const h = await createHarness();
+  try {
+    const ws = await h.personalWorkspace("user_alice");
+    const res = await h.call("user_alice", "POST", `/api/workspaces/${ws}/tasks`, { title: "Cross origin" }, { origin: "https://evil.example" });
+    assert.equal(res.status, 403);
+    assert.equal(res.data.code, "origin_not_allowed");
+  } finally { h.restore(); }
+});
+
+test("API responses carry security headers and a correlation id", async () => {
+  const h = await createHarness();
+  try {
+    const res = await h.call("user_alice", "GET", "/api/me");
+    assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(res.headers.get("x-frame-options"), "DENY");
+    assert.ok(res.headers.get("x-correlation-id"));
+    const page = await worker.fetch(new Request(`${ORIGIN}/`), h.env);
+    assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  } finally { h.restore(); }
 });

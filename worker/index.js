@@ -1,119 +1,119 @@
-import { validateTaskInput, transitionTask, approvalDecision } from "../src/domain/tasks.js";
+// ZUVANE Worker entry: static assets + authenticated, workspace-scoped JSON API.
 import { authenticateClerkRequest } from "../src/auth/clerk.js";
+import { HttpError, errorResponse, json, withSecurityHeaders } from "../src/http.js";
+import { provisionUser, resolveWorkspace } from "../src/services/context.js";
+import { enforceRateLimit } from "../src/services/ratelimit.js";
+import { audit, log } from "../src/services/audit.js";
+import * as api from "../src/api/routes.js";
 
-const json = (data, status = 200) => new Response(JSON.stringify(data), {
-  status,
-  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-});
+export const VERSION = "0.3.0";
 
-const now = () => new Date().toISOString();
-const id = () => crypto.randomUUID();
+// [method, pattern, handler, scope] — scope "user" = authenticated only; "workspace" = membership required.
+const ROUTES = [
+  ["GET", /^\/api\/me$/, api.getMe, "user"],
+  ["GET", /^\/api\/catalog$/, api.getCatalog, "user"],
+  ["POST", /^\/api\/workspaces$/, api.createWorkspace, "user"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)$/, api.getWorkspace, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)$/, api.updateWorkspace, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/overview$/, api.getOverview, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/members$/, api.listMembers, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/members$/, api.addMember, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)\/members\/(?<memberId>[^/]+)$/, api.updateMember, "workspace"],
+  ["DELETE", /^\/api\/workspaces\/(?<ws>[^/]+)\/members\/(?<memberId>[^/]+)$/, api.removeMember, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/tasks$/, api.listTasks, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/tasks$/, api.createTask, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/tasks\/(?<taskId>[^/]+)$/, api.getTask, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)\/tasks\/(?<taskId>[^/]+)$/, api.updateTask, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)\/tasks\/(?<taskId>[^/]+)\/status$/, api.setTaskStatus, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/approvals$/, api.listApprovals, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/approvals$/, api.requestApproval, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/approvals\/(?<approvalId>[^/]+)\/decision$/, api.decideApproval, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/approvals\/(?<approvalId>[^/]+)\/cancel$/, api.cancelApproval, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/agents$/, api.listAgents, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/agents$/, api.createAgent, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/agents\/(?<agentId>[^/]+)$/, api.getAgent, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)\/agents\/(?<agentId>[^/]+)$/, api.updateAgent, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/agents\/(?<agentId>[^/]+)\/status$/, api.setAgentStatus, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/runs$/, api.listRuns, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/runs$/, api.createRun, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/runs\/(?<runId>[^/]+)$/, api.getRun, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/runs\/(?<runId>[^/]+)\/cancel$/, api.cancelRunHandler, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/integrations$/, api.listIntegrations, "workspace"],
+  ["POST", /^\/api\/workspaces\/(?<ws>[^/]+)\/integrations$/, api.createIntegration, "workspace"],
+  ["PATCH", /^\/api\/workspaces\/(?<ws>[^/]+)\/integrations\/(?<connectionId>[^/]+)$/, api.updateIntegration, "workspace"],
+  ["GET", /^\/api\/workspaces\/(?<ws>[^/]+)\/activity$/, api.listActivity, "workspace"]
+];
 
-async function readBody(request) {
-  try { return await request.json(); } catch { return null; }
+function allowedOrigins(env, url) {
+  const configured = String(env.CLERK_AUTHORIZED_PARTIES || "").split(",").map((v) => v.trim()).filter(Boolean);
+  return configured.length ? configured : [url.origin];
+}
+
+async function handleApi(request, env, ctxExec, correlationId) {
+  const url = new URL(request.url);
+
+  if (request.method === "GET" && url.pathname === "/api/health") {
+    return json({ ok: true, service: "zuvane-workspace-api", version: VERSION, database: Boolean(env.DB), auth_configured: Boolean(env.CLERK_ISSUER && env.CLERK_JWKS_URL) });
+  }
+  if (request.method === "GET" && url.pathname === "/api/config") {
+    if (!env.CLERK_PUBLISHABLE_KEY || !env.CLERK_FRONTEND_API_URL) return errorResponse(503, "not_configured", "Clerk frontend configuration is missing.", correlationId);
+    return json({ publishableKey: env.CLERK_PUBLISHABLE_KEY, frontendApiUrl: env.CLERK_FRONTEND_API_URL });
+  }
+
+  // CSRF defence-in-depth: state-changing requests must come from an allowed origin when an Origin header is present.
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    const origin = request.headers.get("origin");
+    if (origin && !allowedOrigins(env, url).includes(origin)) return errorResponse(403, "origin_not_allowed", "Request origin is not allowed.", correlationId);
+  }
+
+  const auth = await authenticateClerkRequest(request, env);
+  if (!auth.ok) {
+    if (auth.status === 401 && env.DB && request.headers.get("authorization")) {
+      // Record failed verification attempts without any token material.
+      ctxExec?.waitUntil?.(audit(env.DB, { actorType: "system", actorId: "auth", action: "auth.rejected", metadata: { path: url.pathname, reason: auth.error }, correlationId }).catch(() => {}));
+    }
+    return errorResponse(auth.status, auth.status === 401 ? "unauthenticated" : "auth_unavailable", auth.error, correlationId);
+  }
+  if (!env.DB) return errorResponse(503, "not_configured", "Database binding is not configured.", correlationId);
+
+  const route = ROUTES.find(([method, pattern]) => method === request.method && pattern.test(url.pathname));
+  if (!route) {
+    const pathExists = ROUTES.some(([, pattern]) => pattern.test(url.pathname));
+    return errorResponse(pathExists ? 405 : 404, pathExists ? "method_not_allowed" : "not_found", pathExists ? "Method not allowed." : "Not found.", correlationId);
+  }
+  const [, pattern, handler, scope] = route;
+  const params = { ...(url.pathname.match(pattern).groups || {}) };
+
+  await enforceRateLimit(env.DB, `api:${auth.userId}`, { limit: Number(env.API_RATE_LIMIT_PER_MIN || 300) });
+  await provisionUser(env, auth.userId, { correlationId });
+  const ctx = { request, env, url, userId: auth.userId, sessionId: auth.sessionId, correlationId };
+  if (scope === "workspace") ctx.workspace = await resolveWorkspace(env.DB, auth.userId, params.ws);
+  return handler(ctx, params);
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctxExec) {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
-
-    if (request.method === "GET" && url.pathname === "/api/health") {
-      return json({ ok: true, service: "zuvane-workspace-api", version: "0.2.0" });
+    if (!url.pathname.startsWith("/api/")) {
+      const response = await env.ASSETS.fetch(request);
+      return withSecurityHeaders(response, env);
     }
-
-    if (request.method === "GET" && url.pathname === "/api/config") {
-      if (!env.CLERK_PUBLISHABLE_KEY || !env.CLERK_FRONTEND_API_URL) {
-        return json({ error: "Clerk frontend configuration is missing." }, 503);
+    const correlationId = request.headers.get("cf-ray") || crypto.randomUUID();
+    const started = Date.now();
+    let response;
+    try {
+      response = await handleApi(request, env, ctxExec, correlationId);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        response = errorResponse(error.status, error.code, error.message, correlationId, error.details);
+      } else {
+        log("error", "unhandled api error", { correlationId, path: url.pathname, error: error instanceof Error ? error.message : String(error) });
+        response = errorResponse(500, "internal_error", "An unexpected error occurred.", correlationId);
       }
-      return json({ publishableKey: env.CLERK_PUBLISHABLE_KEY, frontendApiUrl: env.CLERK_FRONTEND_API_URL });
     }
-
-    const auth = await authenticateClerkRequest(request, env);
-    if (!auth.ok) return json({ error: auth.error }, auth.status);
-    const ownerId = auth.userId;
-
-    if (!env.DB) return json({ error: "Database binding is not configured." }, 503);
-
-    if (request.method === "GET" && url.pathname === "/api/tasks") {
-      const { results = [] } = await env.DB.prepare(
-        "SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE owner_id = ? ORDER BY updated_at DESC LIMIT 100"
-      ).bind(ownerId).all();
-      return json({ tasks: results });
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/tasks") {
-      const parsed = validateTaskInput(await readBody(request));
-      if (!parsed.ok) return json({ error: parsed.error }, 400);
-      const timestamp = now();
-      const task = { id: id(), ...parsed.value, status: "planned", created_at: timestamp, updated_at: timestamp };
-      await env.DB.prepare(
-        "INSERT INTO tasks (id, owner_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(task.id, ownerId, task.title, task.description, task.status, task.priority, task.created_at, task.updated_at).run();
-      return json({ task }, 201);
-    }
-
-    const statusMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/status$/);
-    if (request.method === "PATCH" && statusMatch) {
-      const body = await readBody(request);
-      const current = await env.DB.prepare("SELECT * FROM tasks WHERE id = ? AND owner_id = ?")
-        .bind(statusMatch[1], ownerId).first();
-      if (!current) return json({ error: "Task not found." }, 404);
-      const moved = transitionTask(current, body?.status);
-      if (!moved.ok) return json({ error: moved.error }, 409);
-      const updatedAt = now();
-      await env.DB.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND owner_id = ?")
-        .bind(moved.value.status, updatedAt, current.id, ownerId).run();
-      return json({ task: { ...moved.value, updated_at: updatedAt } });
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/approvals") {
-      const body = await readBody(request);
-      const action = typeof body?.action === "string" ? body.action.trim() : "";
-      if (!body?.task_id || !action || action.length > 160) {
-        return json({ error: "task_id and a short action description are required." }, 400);
-      }
-      const task = await env.DB.prepare("SELECT id, status FROM tasks WHERE id = ? AND owner_id = ?")
-        .bind(body.task_id, ownerId).first();
-      if (!task) return json({ error: "Task not found." }, 404);
-      if (task.status !== "in_progress") return json({ error: "Only in-progress tasks can request approval." }, 409);
-      const approval = { id: id(), task_id: task.id, action, status: "pending", requested_at: now() };
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO approvals (id, task_id, action, status, requested_at) VALUES (?, ?, ?, ?, ?)")
-          .bind(approval.id, approval.task_id, approval.action, approval.status, approval.requested_at),
-        env.DB.prepare("UPDATE tasks SET status = 'needs_approval', updated_at = ? WHERE id = ? AND owner_id = ?")
-          .bind(approval.requested_at, task.id, ownerId)
-      ]);
-      return json({ approval }, 201);
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/approvals") {
-      const { results = [] } = await env.DB.prepare(
-        "SELECT a.id, a.task_id, a.action, a.status, a.requested_at, a.decided_at FROM approvals a INNER JOIN tasks t ON t.id = a.task_id WHERE a.status = 'pending' AND t.owner_id = ? ORDER BY a.requested_at ASC"
-      ).bind(ownerId).all();
-      return json({ approvals: results });
-    }
-
-    const decisionMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)\/decision$/);
-    if (request.method === "POST" && decisionMatch) {
-      const body = await readBody(request);
-      const approval = await env.DB.prepare(
-        "SELECT a.* FROM approvals a INNER JOIN tasks t ON t.id = a.task_id WHERE a.id = ? AND t.owner_id = ?"
-      ).bind(decisionMatch[1], ownerId).first();
-      if (!approval) return json({ error: "Approval not found." }, 404);
-      const decided = approvalDecision(approval, body?.decision);
-      if (!decided.ok) return json({ error: decided.error }, 409);
-      const decidedAt = now();
-      const nextTaskStatus = body.decision === "approved" ? "in_progress" : "blocked";
-      await env.DB.batch([
-        env.DB.prepare("UPDATE approvals SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'")
-          .bind(body.decision, decidedAt, approval.id),
-        env.DB.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND status = 'needs_approval'")
-          .bind(nextTaskStatus, decidedAt, approval.task_id, ownerId)
-      ]);
-      return json({ approval: { ...decided.value, decided_at: decidedAt }, task_status: nextTaskStatus });
-    }
-
-    return json({ error: "Not found." }, 404);
+    log(response.status >= 500 ? "error" : "info", "api request", { correlationId, method: request.method, path: url.pathname, status: response.status, ms: Date.now() - started });
+    const out = withSecurityHeaders(response, env);
+    out.headers.set("x-correlation-id", correlationId);
+    return out;
   }
 };
