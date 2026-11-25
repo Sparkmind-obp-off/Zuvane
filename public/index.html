@@ -11,9 +11,33 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/auth.css">
   <script type="module" src="/app.js"></script>
 </head>
-<body>
+<body class="auth-pending">
+  <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title">
+    <div class="auth-gate-aside">
+      <a class="brand auth-brand" href="/" aria-label="ZUVANE home"><img src="/zuvane-symbol.svg" alt=""><span>ZUVANE</span></a>
+      <div class="auth-statement">
+        <div class="eyebrow"><span class="eyebrow-line"></span> THE HUMAN CONTROL LAYER</div>
+        <h1>Bring every<br>moving part<br><span>into focus.</span></h1>
+        <p>A private workspace for deliberate work, coordinated agents, and decisions that stay yours.</p>
+      </div>
+      <div class="auth-aside-foot"><span>WORK, ORCHESTRATED.</span><span>PEOPLE, IN CONTROL.</span></div>
+    </div>
+    <div class="auth-gate-main">
+      <div class="auth-gate-top"><span class="mono tiny">ZUVANE / SECURE ACCESS</span><span class="auth-lock">ENCRYPTED SESSION</span></div>
+      <div class="auth-card">
+        <div class="auth-card-mark"><img src="/zuvane-symbol.svg" alt=""></div>
+        <div class="eyebrow">WELCOME TO YOUR WORKSPACE</div>
+        <h2 id="auth-title">Sign in to continue.</h2>
+        <p>Your work queue and approvals are private to your account.</p>
+        <div id="clerk-sign-in" class="clerk-mount"><div class="auth-loading">Preparing secure sign-in…</div></div>
+        <p class="auth-footnote">Access is secured by Clerk. Your session is verified by the ZUVANE workspace API.</p>
+      </div>
+      <div class="auth-gate-bottom">PRIVATE BY DEFAULT <span>·</span> HUMAN AUTHORITY ALWAYS</div>
+    </div>
+  </section>
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="ZUVANE home"><img src="/zuvane-symbol.svg" alt=""><span>ZUVANE</span></a>
@@ -25,17 +49,17 @@
         <a class="nav-item disabled" href="#agents" aria-disabled="true"><span class="nav-icon">◇</span> Agents <span class="soon">SOON</span></a>
         <a class="nav-item disabled" href="#integrations" aria-disabled="true"><span class="nav-icon">⌘</span> Integrations <span class="soon">SOON</span></a>
       </nav>
-      <div class="sidebar-bottom"><div class="connection"><span class="status-dot"></span><span><strong>Workspace API</strong><small id="connection-state">Connecting…</small></span></div><div class="user-chip"><div class="avatar">Z</div><span><strong>Workspace owner</strong><small>Personal workspace</small></span><button class="more" aria-label="More options">···</button></div></div>
+      <div class="sidebar-bottom"><div class="connection"><span class="status-dot"></span><span><strong>Workspace API</strong><small id="connection-state">Connecting…</small></span></div><div class="user-chip"><div class="avatar" id="user-avatar">Z</div><span><strong id="user-name">Workspace member</strong><small id="user-email">Signed in</small></span></div></div>
     </aside>
     <main class="main">
-      <header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> Overview</div><div class="top-actions"><span class="live-pill"><i></i> PRIVATE WORKSPACE</span><button class="icon-button" aria-label="Notifications">♧</button><div class="avatar small">Z</div></div></header>
+      <header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> Overview</div><div class="top-actions"><span class="live-pill"><i></i> PRIVATE WORKSPACE</span><button class="icon-button" aria-label="Notifications">♧</button><div id="user-button" class="user-button-mount" aria-label="Account menu"></div></div></header>
       <section class="welcome" id="overview"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR COMMAND CENTER</div><h1>Make progress.<br><span>Stay in control.</span></h1><p>Coordinate your work, keep decisions visible, and let every action remain accountable.</p></div><div class="welcome-mark"><img src="/zuvane-symbol.svg" alt=""></div></section>
       <section class="metrics" aria-label="Workspace summary"><article class="metric"><div class="metric-label">TOTAL TASKS <span>↗</span></div><div class="metric-value" id="metric-total">—</div><div class="metric-foot">Across this workspace</div></article><article class="metric"><div class="metric-label">IN PROGRESS <span class="metric-icon teal">◉</span></div><div class="metric-value" id="metric-progress">—</div><div class="metric-foot">Moving forward</div></article><article class="metric"><div class="metric-label">AWAITING APPROVAL <span class="metric-icon amber">◷</span></div><div class="metric-value" id="metric-approvals">—</div><div class="metric-foot">Your decision is needed</div></article><article class="metric"><div class="metric-label">COMPLETED <span class="metric-icon blue">✓</span></div><div class="metric-value" id="metric-completed">—</div><div class="metric-foot">Successfully finished</div></article></section>
       <section class="content-grid">
         <section class="panel tasks-panel" id="tasks"><div class="panel-head"><div><div class="eyebrow">WORK QUEUE</div><h2>Tasks <span class="subtle" id="task-subtitle">Your current priorities</span></h2></div><button class="button primary" id="new-task-button"><span>＋</span> New task</button></div><div class="toolbar"><div class="tabs" role="tablist" aria-label="Filter tasks"><button class="tab active" data-filter="all">All tasks</button><button class="tab" data-filter="in_progress">In progress</button><button class="tab" data-filter="planned">Planned</button><button class="tab" data-filter="completed">Completed</button></div><span class="mono tiny" id="task-total-label">0 ITEMS</span></div><div id="task-list" class="task-list"><div class="empty-state">Loading your workspace…</div></div></section>
         <aside class="right-column"><section class="panel approval-panel" id="approvals"><div class="panel-head"><div><div class="eyebrow">HUMAN IN THE LOOP</div><h2>Approvals</h2></div><span class="counter" id="approval-counter">0</span></div><p class="panel-copy">Consequential actions pause here until you decide.</p><div id="approval-list" class="approval-list"><div class="empty-state compact">No pending approvals.</div></div></section><section class="principle-card"><div class="principle-icon">⌁</div><div class="eyebrow">BUILT AROUND YOU</div><h3>AI that works<br>with your authority.</h3><p>Clear boundaries. Visible progress. Decisions stay yours.</p><div class="principle-line"></div><span class="mono tiny">ZUVANE / CONTROL LAYER 01</span></section></aside>
       </section>
-      <footer><span>© 2026 ZUVANE</span><span>Work, orchestrated. People, in control.</span><span class="mono">BUILD 0.1.0</span></footer>
+      <footer><span>© 2026 ZUVANE</span><span>Work, orchestrated. People, in control.</span><span class="mono">BUILD 0.2.0</span></footer>
     </main>
   </div>
   <dialog id="task-dialog"><form id="task-form" method="dialog"><div class="dialog-head"><div><div class="eyebrow">ADD TO WORKSPACE</div><h2>Create a task</h2></div><button class="icon-button" type="button" id="close-dialog" aria-label="Close">×</button></div><label for="task-title">Task title</label><input id="task-title" name="title" required minlength="3" maxlength="120" placeholder="What needs to move forward?"><label for="task-description">Description <span>OPTIONAL</span></label><textarea id="task-description" name="description" maxlength="2000" rows="3" placeholder="Add context, expected outcome, or notes…"></textarea><label for="task-priority">Priority</label><select id="task-priority" name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select><p class="form-error" id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary" id="cancel-dialog">Cancel</button><button type="submit" class="button primary">Create task</button></div></form></dialog>

@@ -2,19 +2,18 @@
 
 **Work, orchestrated. People, in control.**
 
-ZUVANE is an independent Agentic Workspace for individuals and teams. It coordinates multi-agent work across hybrid infrastructure while keeping consequential actions bounded by explicit human authority.
+ZUVANE is an independent Agentic Workspace for individuals and teams. It coordinates AI work while keeping consequential actions bounded by explicit human authority.
 
 ## Current application slice
 
-The repository now includes a runnable full-stack MVP foundation:
+The repository includes a full-stack workspace foundation:
 - Responsive workspace dashboard and ZUVANE design system.
-- Task creation, task list, priorities, and guarded status transitions.
-- Human approval queue for consequential task actions.
-- Cloudflare Worker API and D1 schema/migration.
-- Deterministic domain logic with Node.js tests.
-- GitHub Actions CI for syntax and unit-test checks.
+- Clerk sign-in UI and verified session authentication at the Worker boundary.
+- User-scoped task creation, task lists, guarded status transitions, and approval queue.
+- Cloudflare Worker API and versioned D1 schema migrations.
+- Deterministic domain logic, RS256/JWKS verification tests, and GitHub Actions CI.
 
-This is a **first vertical slice**, not a finished production agent platform. Authentication, team membership, live agents, model integrations, external tool execution, and production deployment are not yet enabled.
+This is an **authenticated personal-workspace vertical slice**, not a finished production agent platform. Team membership, organization RBAC, live agent execution, model integrations, external tool execution, and production deployment are not yet enabled.
 
 ## Product principles
 
@@ -33,11 +32,13 @@ This is a **first vertical slice**, not a finished production agent platform. Au
 
 ## Repository map
 
-- `public/` — responsive workspace UI and brand assets
-- `worker/` — Cloudflare Worker API
+- `public/` — responsive workspace UI, Clerk auth surface, and brand assets
+- `worker/` — Cloudflare Worker API and auth boundary
+- `src/auth/` — provider-specific Clerk JWT verification
 - `src/domain/` — provider-neutral task and approval rules
 - `test/` — automated tests
 - `migrations/` — D1 schema migrations
+- `docs/security/` — authentication and ownership contract
 - `docs/brand/` — strategy and identity standards
 - `docs/design/` — design tokens and usage guidance
 
@@ -57,7 +58,7 @@ Run checks:
 npm run check
 ```
 
-The D1 identifier in `wrangler.toml` is a local placeholder. No production Cloudflare resources are created or activated by this repository. Production provisioning requires a separate cost/access review and explicit approval.
+The local Wrangler config uses the existing Clerk development instance. Production requires the production Clerk variables and an actual D1 database ID; see [Clerk authentication](docs/security/clerk-authentication.md). The D1 identifier in `wrangler.toml` is a local placeholder. No production Cloudflare resources are created or activated by this repository. Production provisioning requires a separate cost/access review and explicit approval.
 
 ## License
 

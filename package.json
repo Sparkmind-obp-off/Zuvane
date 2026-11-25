@@ -1,6 +1,6 @@
 {
   "name": "zuvane-workspace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "ZUVANE Agentic Workspace",
@@ -8,7 +8,7 @@
     "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check worker/index.js && node --check src/domain/tasks.js && node --test"
+    "check": "node --check worker/index.js && node --check src/domain/tasks.js && node --check src/auth/clerk.js && node --check public/app.js && node --test"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

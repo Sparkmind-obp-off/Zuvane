@@ -1,19 +1,26 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { tasks: [], approvals: [], filter: "all", apiOnline: false };
+const state = { tasks: [], approvals: [], filter: "all", apiOnline: false, clerk: null };
 
 async function api(path, options = {}) {
+  const token = await state.clerk?.session?.getToken();
+  if (!token) throw new Error("Your session has ended. Sign in again.");
   const response = await fetch(path, {
     ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) }
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(options.headers || {}) }
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
 }
 function escapeHtml(value = "") {
-  return String(value).replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[char]);
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+function syncIdentity(user) {
+  const name = user?.fullName || user?.firstName || "Workspace member";
+  const email = user?.primaryEmailAddress?.emailAddress || "Signed in securely";
+  $("#user-name").textContent = name;
+  $("#user-email").textContent = email;
+  $("#user-avatar").textContent = name.trim().charAt(0).toUpperCase() || "Z";
 }
 function prettyStatus(status) {
   return ({ planned: "Planned", in_progress: "In progress", needs_approval: "Needs approval", completed: "Completed", blocked: "Blocked" })[status] || status;
@@ -52,7 +59,7 @@ async function refresh() {
   } catch (error) {
     state.apiOnline = false; $("#connection-state").textContent = "Unavailable";
     $(".status-dot").classList.remove("online");
-    $("#task-list").innerHTML = '<div class="empty-state">The workspace API is unavailable. Start the local Worker and configure its D1 database.</div>';
+    $("#task-list").innerHTML = '<div class="empty-state">The workspace API is unavailable. Check the Worker and D1 configuration.</div>';
     toast(error.message, true);
   }
 }
@@ -94,4 +101,69 @@ document.addEventListener("click", async (event) => {
     }
   } catch (error) { toast(error.message, true); }
 });
-refresh();
+
+function loadScript(src, attributes = {}) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    Object.entries(attributes).forEach(([key, value]) => script.setAttribute(key, value));
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Unable to load ${new URL(src).hostname}. Check the Clerk frontend domain.`));
+    document.head.appendChild(script);
+  });
+}
+
+async function initializeAuth() {
+  const gate = $("#auth-gate");
+  try {
+    const configResponse = await fetch("/api/config", { headers: { accept: "application/json" } });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!configResponse.ok) throw new Error(config.error || "Clerk frontend configuration is unavailable.");
+    const frontendApi = new URL(config.frontendApiUrl).host;
+    await loadScript(`https://${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js`);
+    await loadScript(`https://${frontendApi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
+      "data-clerk-publishable-key": config.publishableKey
+    });
+    if (!window.Clerk) throw new Error("ClerkJS did not initialize. Check the publishable key and frontend API domain.");
+    state.clerk = window.Clerk;
+    await state.clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+
+    const sync = async ({ user, session }) => {
+      const signedIn = Boolean(user && session);
+      document.body.classList.toggle("is-authenticated", signedIn);
+      document.body.classList.toggle("is-signed-out", !signedIn);
+      if (signedIn) {
+        syncIdentity(user);
+        const userButton = $("#user-button");
+        if (!userButton.dataset.mounted) {
+          state.clerk.mountUserButton(userButton);
+          userButton.dataset.mounted = "true";
+        }
+        if (gate) gate.setAttribute("aria-hidden", "true");
+        await refresh();
+      } else {
+        state.tasks = [];
+        state.approvals = [];
+        if (gate) gate.removeAttribute("aria-hidden");
+        const signIn = $("#clerk-sign-in");
+        if (signIn && !signIn.dataset.mounted) {
+          signIn.replaceChildren();
+          state.clerk.mountSignIn(signIn);
+          signIn.dataset.mounted = "true";
+        }
+      }
+    };
+    state.clerk.addListener(sync);
+    await sync({ user: state.clerk.user, session: state.clerk.session });
+    document.body.classList.remove("auth-pending");
+  } catch (error) {
+    document.body.classList.remove("auth-pending", "is-authenticated");
+    document.body.classList.add("is-signed-out", "auth-error");
+    const signIn = $("#clerk-sign-in");
+    if (signIn) signIn.innerHTML = `<p class="auth-error-message">${escapeHtml(error.message)}</p><button class="button secondary" id="retry-auth">Retry connection</button>`;
+    $("#retry-auth")?.addEventListener("click", () => window.location.reload());
+  }
+}
+initializeAuth();

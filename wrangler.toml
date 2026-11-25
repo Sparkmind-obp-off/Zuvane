@@ -8,6 +8,13 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = ["/api/*"]
 
+[vars]
+# Development Clerk instance. Set production values in the Cloudflare production environment.
+CLERK_PUBLISHABLE_KEY = "pk_test_YWN0dWFsLWNvbHQtMzAzOC5jbGVyay5hY2NvdW50cy5kZXYk"
+CLERK_FRONTEND_API_URL = "https://actual-colt-3038.clerk.accounts.dev"
+CLERK_ISSUER = "https://actual-colt-3038.clerk.accounts.dev"
+CLERK_JWKS_URL = "https://actual-colt-3038.clerk.accounts.dev/.well-known/jwks.json"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "zuvane-local"
